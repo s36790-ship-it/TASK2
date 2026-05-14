@@ -4,6 +4,8 @@ from scapy.all import ARP, sniff
 
 from database import Device, SessionLocal, init_db, utcnow
 
+__all__ = ["start", "start_in_background"]
+
 
 def _upsert(ip: str, mac: str) -> None:
     with SessionLocal() as session:
@@ -22,16 +24,15 @@ def _handle(packet) -> None:
 
 
 def start(iface: str | None = None) -> None:
-    init_db()
     sniff(filter="arp", prn=_handle, store=False, iface=iface)
 
 
 def start_in_background(iface: str | None = None) -> threading.Thread:
-    init_db()
     thread = threading.Thread(target=start, kwargs={"iface": iface}, daemon=True)
     thread.start()
     return thread
 
 
 if __name__ == "__main__":
+    init_db()
     start()

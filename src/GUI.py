@@ -18,7 +18,6 @@ class NetworkScannerGUI(ctk.CTk):
         self.title("Passive Network Sentinel - PJATK Project")
         self.geometry("1100x650")
 
-        init_db()
         arp_sniffer.start_in_background()
 
         self.grid_columnconfigure(1, weight=1)
@@ -184,5 +183,6 @@ class NetworkScannerGUI(ctk.CTk):
                 messagebox.showerror("Błąd", f"Błąd zapisu: {e}")
 
 if __name__ == "__main__":
+    init_db()
     app = NetworkScannerGUI()
     app.mainloop()
