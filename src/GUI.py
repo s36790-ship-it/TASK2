@@ -5,6 +5,9 @@ import os
 from PIL import Image
 from tkinter import filedialog, messagebox
 
+import arp_sniffer
+from database import Device, SessionLocal, init_db
+
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -15,16 +18,19 @@ class NetworkScannerGUI(ctk.CTk):
         self.title("Passive Network Sentinel - PJATK Project")
         self.geometry("1100x650")
 
+        init_db()
+        arp_sniffer.start_in_background()
+
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "logo-rnd.png")
-        
+        image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../logo-rnd.png")
+
         try:
             self.logo_image = ctk.CTkImage(
                 light_image=Image.open(image_path),
                 dark_image=Image.open(image_path),
-                size=(300, 150) 
+                size=(300, 150)
             )
         except Exception as e:
             print(f"Błąd ładowania logo: {e}")
@@ -41,32 +47,32 @@ class NetworkScannerGUI(ctk.CTk):
         self.logo_label.pack(pady=(20, 10), padx=20)
 
         self.title_label = ctk.CTkLabel(
-            self.sidebar, 
-            text="PASSIVE SENTINEL", 
+            self.sidebar,
+            text="PASSIVE SENTINEL",
             font=ctk.CTkFont(size=18, weight="bold")
         )
         self.title_label.pack(pady=(0, 30))
 
         self.btn_dashboard = ctk.CTkButton(
-            self.sidebar, 
-            text="Dashboard", 
-            fg_color="transparent", 
+            self.sidebar,
+            text="Dashboard",
+            fg_color="transparent",
             border_width=1,
             hover_color="#1f538d"
         )
         self.btn_dashboard.pack(pady=10, padx=20, fill="x")
 
         self.btn_settings = ctk.CTkButton(
-            self.sidebar, 
-            text="Ustawienia Skanera", 
-            fg_color="transparent", 
+            self.sidebar,
+            text="Ustawienia Skanera",
+            fg_color="transparent",
             border_width=1
         )
         self.btn_settings.pack(pady=10, padx=20, fill="x")
 
         self.status_label = ctk.CTkLabel(
-            self.sidebar, 
-            text="● Skanowanie aktywne", 
+            self.sidebar,
+            text="● Skanowanie aktywne",
             text_color="#2ecc71",
             font=ctk.CTkFont(size=12)
         )
@@ -77,25 +83,25 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.stats_frame = ctk.CTkFrame(self.main_frame, height=80)
         self.stats_frame.pack(fill="x", pady=(0, 20))
-        
+
         self.device_count_label = ctk.CTkLabel(
-            self.stats_frame, 
-            text="Wykryte urządzenia: 0", 
+            self.stats_frame,
+            text="Wykryte urządzenia: 0",
             font=ctk.CTkFont(size=16, weight="bold")
         )
         self.device_count_label.pack(side="left", padx=30, pady=20)
 
         self.setup_table_style()
-        
+
         self.table_container = ctk.CTkFrame(self.main_frame)
         self.table_container.pack(fill="both", expand=True)
 
         self.table = ttk.Treeview(
-            self.table_container, 
-            columns=("IP", "MAC", "Vendor", "Protocol", "Last Seen"), 
+            self.table_container,
+            columns=("IP", "MAC", "Vendor", "Protocol", "Last Seen"),
             show="headings"
         )
-        
+
         self.table.heading("IP", text="Adres IP")
         self.table.heading("MAC", text="Adres MAC")
         self.table.heading("Vendor", text="Producent")
@@ -108,8 +114,8 @@ class NetworkScannerGUI(ctk.CTk):
         self.table.pack(fill="both", expand=True, padx=5, pady=5)
 
         self.export_btn = ctk.CTkButton(
-            self.main_frame, 
-            text="Eksportuj Raport do CSV", 
+            self.main_frame,
+            text="Eksportuj Raport do CSV",
             command=self.export_data,
             fg_color="#1f538d",
             hover_color="#14375e"
@@ -133,25 +139,23 @@ class NetworkScannerGUI(ctk.CTk):
         style.map("Treeview", background=[('selected', '#1f538d')])
 
     def update_data(self):
-
-        """TUTAJ BACKEND I DB"""
-
         for i in self.table.get_children():
             self.table.delete(i)
-            
-        """PRZYKŁADOWANE DANE JAK COŚ"""
 
-        mock_data = [
-            ("192.168.1.15", "AA:BB:CC:00:11:22", "Apple Inc.", "mDNS", "17:12:01"),
-            ("192.168.1.42", "BB:CC:DD:33:44:55", "Samsung Electronics", "SSDP", "17:12:45"),
-            ("192.168.1.101", "00:50:56:C0:00:08", "VMware", "ARP", "17:13:10")
-        ]
-        
-        for row in mock_data:
-            self.table.insert("", "end", values=row)
-            
-        self.device_count_label.configure(text=f"Wykryte urządzenia: {len(mock_data)}")
-        
+        with SessionLocal() as session:
+            devices = session.query(Device).order_by(Device.last_seen.desc()).all()
+
+        for d in devices:
+            self.table.insert("", "end", values=(
+                d.ip or "",
+                d.mac,
+                d.vendor or "",
+                d.protocol or "",
+                d.last_seen.strftime("%H:%M:%S") if d.last_seen else "",
+            ))
+
+        self.device_count_label.configure(text=f"Wykryte urządzenia: {len(devices)}")
+
         self.after(5000, self.update_data)
 
     def export_data(self):
