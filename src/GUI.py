@@ -86,7 +86,17 @@ class NetworkScannerGUI(ctk.CTk):
             text="Wykryte urządzenia: 0", 
             font=ctk.CTkFont(size=16, weight="bold")
         )
-        self.unique_devices_label.pack(side="left", padx=30, pady=20)
+        self.device_count_label.pack(side="left", padx=30, pady=20)
+
+        self.stats_frame = ctk.CTkFrame(self.main_frame, height=80)
+        self.stats_frame.pack(fill="x", pady=(0, 20))
+        
+        self.total_events_label = ctk.CTkLabel(
+            self.stats_frame, 
+            text="Wszystkie zdarzenia: 0", 
+            font=ctk.CTkFont(size=15, weight="bold")
+        )
+        self.total_events_label.pack(side="left", padx=30, pady=20)
 
         self.setup_table_style()
 
@@ -103,15 +113,13 @@ class NetworkScannerGUI(ctk.CTk):
         self.table.heading("MAC", text="Adres MAC")
         self.table.heading("Vendor", text="Producent")
         self.table.heading("Protocol", text="Protokół")
-        self.table.heading("MAC", text="Źródłowy MAC")
-        self.table.heading("IP", text="Wykryty/Przypisany IP")
-        self.table.heading("Details", text="Szczegóły zdarzenia")
+        self.table.heading("Last Seen", text="Aktywność")
 
-        self.table.column("Time", width=90, anchor="center")
-        self.table.column("Protocol", width=90, anchor="center")
-        self.table.column("MAC", width=140, anchor="center")
         self.table.column("IP", width=130, anchor="center")
-        self.table.column("Details", width=400, anchor="w")
+        self.table.column("MAC", width=140, anchor="center")
+        self.table.column("Vendor", width=150, anchor="center")
+        self.table.column("Protocol", width=90, anchor="center")
+        self.table.column("Last Seen", width=100, anchor="center")
 
         self.table.pack(fill="both", expand=True, padx=5, pady=5)
 
@@ -157,6 +165,9 @@ class NetworkScannerGUI(ctk.CTk):
         
         for row in mock_data:
             self.table.insert("", "end", values=row)
+
+        all_macs = [row[1] for row in mock_data]
+        unique_macs_count = len(set(all_macs))
             
         self.device_count_label.configure(text=f"Wykryte urządzenia: {len(mock_data)}")
         
