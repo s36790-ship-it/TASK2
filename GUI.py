@@ -12,8 +12,8 @@ class NetworkScannerGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Passive Network Sentinel - PJATK Project")
-        self.geometry("1100x650")
+        self.title("Passive Network Sentinel - PJSEC Project")
+        self.geometry("1150x650")
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -49,10 +49,10 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.btn_dashboard = ctk.CTkButton(
             self.sidebar, 
-            text="Dashboard", 
-            fg_color="transparent", 
+            text="Live Events Feed", 
+            fg_color="#1f538d", 
             border_width=1,
-            hover_color="#1f538d"
+            hover_color="#14375e"
         )
         self.btn_dashboard.pack(pady=10, padx=20, fill="x")
 
@@ -66,7 +66,7 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.status_label = ctk.CTkLabel(
             self.sidebar, 
-            text="● Skanowanie aktywne", 
+            text="● Nasłuchiwanie sieci...", 
             text_color="#2ecc71",
             font=ctk.CTkFont(size=12)
         )
@@ -78,12 +78,20 @@ class NetworkScannerGUI(ctk.CTk):
         self.stats_frame = ctk.CTkFrame(self.main_frame, height=80)
         self.stats_frame.pack(fill="x", pady=(0, 20))
         
-        self.device_count_label = ctk.CTkLabel(
+        self.total_events_label = ctk.CTkLabel(
             self.stats_frame, 
-            text="Wykryte urządzenia: 0", 
-            font=ctk.CTkFont(size=16, weight="bold")
+            text="Wszystkie zdarzenia: 0", 
+            font=ctk.CTkFont(size=15, weight="bold")
         )
-        self.device_count_label.pack(side="left", padx=30, pady=20)
+        self.total_events_label.pack(side="left", padx=30, pady=20)
+
+        self.unique_devices_label = ctk.CTkLabel(
+            self.stats_frame, 
+            text="Unikalne urządzenia (MAC): 0", 
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color="#3498db"
+        )
+        self.unique_devices_label.pack(side="left", padx=30, pady=20)
 
         self.setup_table_style()
         
@@ -92,24 +100,27 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.table = ttk.Treeview(
             self.table_container, 
-            columns=("IP", "MAC", "Vendor", "Protocol", "Last Seen"), 
+            columns=("Time", "Protocol", "MAC", "IP", "Details"), 
             show="headings"
         )
         
-        self.table.heading("IP", text="Adres IP")
-        self.table.heading("MAC", text="Adres MAC")
-        self.table.heading("Vendor", text="Producent")
+        self.table.heading("Time", text="Czas")
         self.table.heading("Protocol", text="Protokół")
-        self.table.heading("Last Seen", text="Aktywność")
+        self.table.heading("MAC", text="Źródłowy MAC")
+        self.table.heading("IP", text="Wykryty/Przypisany IP")
+        self.table.heading("Details", text="Szczegóły zdarzenia")
 
-        for col in ("IP", "MAC", "Vendor", "Protocol", "Last Seen"):
-            self.table.column(col, anchor="center")
+        self.table.column("Time", width=90, anchor="center")
+        self.table.column("Protocol", width=90, anchor="center")
+        self.table.column("MAC", width=140, anchor="center")
+        self.table.column("IP", width=130, anchor="center")
+        self.table.column("Details", width=400, anchor="w")
 
         self.table.pack(fill="both", expand=True, padx=5, pady=5)
 
         self.export_btn = ctk.CTkButton(
             self.main_frame, 
-            text="Eksportuj Raport do CSV", 
+            text="Eksportuj Logi do CSV", 
             command=self.export_data,
             fg_color="#1f538d",
             hover_color="#14375e"
@@ -133,24 +144,27 @@ class NetworkScannerGUI(ctk.CTk):
         style.map("Treeview", background=[('selected', '#1f538d')])
 
     def update_data(self):
-
         """TUTAJ BACKEND I DB"""
-
         for i in self.table.get_children():
             self.table.delete(i)
             
-        """PRZYKŁADOWANE DANE JAK COŚ"""
-
+        # Zaktualizowane przykładowe dane pokazujące historię pakietów z DHCP i mDNS
         mock_data = [
-            ("192.168.1.15", "AA:BB:CC:00:11:22", "Apple Inc.", "mDNS", "17:12:01"),
-            ("192.168.1.42", "BB:CC:DD:33:44:55", "Samsung Electronics", "SSDP", "17:12:45"),
-            ("192.168.1.101", "00:50:56:C0:00:08", "VMware", "ARP", "17:13:10")
+            ("17:12:01", "DHCP", "AA:BB:CC:00:11:22", "0.0.0.0", "DHCP Discover (Urządzenie prosi o adres)"),
+            ("17:12:03", "DHCP", "AA:BB:CC:00:11:22", "192.168.1.15", "DHCP Request (Przypisano IP przez router)"),
+            ("17:12:45", "SSDP", "BB:CC:DD:33:44:55", "192.168.1.42", "Rozgłoszenie usługi UPnP Serwera Mediów"),
+            ("17:13:10", "ARP", "00:50:56:C0:00:08", "192.168.1.101", "Who has 192.168.1.1? Tell 192.168.1.101"),
+            ("17:13:15", "mDNS", "AA:BB:CC:00:11:22", "192.168.1.15", "Zapytanie o urządzenie: iPhone-Dawida.local")
         ]
         
         for row in mock_data:
             self.table.insert("", "end", values=row)
             
-        self.device_count_label.configure(text=f"Wykryte urządzenia: {len(mock_data)}")
+        all_macs = [row[2] for row in mock_data]
+        unique_macs_count = len(set(all_macs))
+            
+        self.total_events_label.configure(text=f"Wszystkie zdarzenia: {len(mock_data)}")
+        self.unique_devices_label.configure(text=f"Unikalne urządzenia (MAC): {unique_macs_count}")
         
         self.after(5000, self.update_data)
 
@@ -166,14 +180,14 @@ class NetworkScannerGUI(ctk.CTk):
         file_path = filedialog.asksaveasfilename(
             defaultextension=".csv",
             filetypes=[("Pliki CSV", "*.csv")],
-            initialfile="raport.csv"
+            initialfile="raport_zdarzen.csv"
         )
 
         if file_path:
             try:
                 with open(file_path, mode="w", newline="", encoding="utf-8") as file:
                     writer = csv.writer(file)
-                    writer.writerow(["IP", "MAC", "Vendor", "Protocol", "Last Seen"])
+                    writer.writerow(["Czas", "Protokół", "MAC", "IP", "Szczegóły"])
                     writer.writerows(data_to_save)
                 messagebox.showinfo("Sukces", f"Zapisano pomyślnie")
             except Exception as e:
