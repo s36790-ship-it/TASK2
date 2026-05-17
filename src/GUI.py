@@ -8,6 +8,8 @@ from tkinter import filedialog, messagebox
 from plyer import notification
 
 import arp_sniffer
+import dhcp_sniffer
+import mdns_sniffer
 from database import Device, SessionLocal, init_db
 
 try:
@@ -109,6 +111,8 @@ class NetworkScannerGUI(ctk.CTk):
 
         init_db()
         arp_sniffer.start_in_background()
+        dhcp_sniffer.start_in_background()
+        mdns_sniffer.start_in_background()
         self.update_data()
 
     def build_dashboard_view(self):

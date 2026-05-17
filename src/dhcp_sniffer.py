@@ -54,11 +54,8 @@ def _handle(packet) -> None:
                 ip = packet[BOOTP].yiaddr
                 
             # Jeśli udało się zebrać komplet danych i IP nie jest puste, zapisujemy
-            print("zapisujemy")
-            print(ip, mac)
             if ip and mac and ip != "0.0.0.0":
                 _upsert(ip, mac, protocol="DHCP")
-                print(f"[DHCP Sniffer] Zapisano urządzenie: {ip} <-> {mac}")
 
 
 def start(iface: str | None = None) -> None:
