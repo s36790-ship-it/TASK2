@@ -17,11 +17,10 @@ class Device(Base):
 
     id = Column(Integer, primary_key=True)
     ip = Column(String, index=True)
-    mac = Column(String, unique=True, index=True, nullable=False)
+    mac = Column(String, index=True, nullable=False)
     vendor = Column(String)
     protocol = Column(String)
     last_seen = Column(DateTime, default=utcnow)
-
 
 def init_db() -> None:
     Base.metadata.create_all(engine)

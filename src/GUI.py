@@ -6,6 +6,7 @@ from PIL import Image
 from tkinter import filedialog, messagebox
 
 import arp_sniffer
+import dhcp_sniffer
 from database import Device, SessionLocal, init_db
 
 ctk.set_appearance_mode("dark")
@@ -19,6 +20,7 @@ class NetworkScannerGUI(ctk.CTk):
         self.geometry("1100x650")
 
         arp_sniffer.start_in_background()
+        dhcp_sniffer.start_in_background()
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -139,7 +141,7 @@ class NetworkScannerGUI(ctk.CTk):
 
     def update_data(self):
         for i in self.table.get_children():
-            self.table.delete(i)
+            self.table.delete(i) 
 
         with SessionLocal() as session:
             devices = session.query(Device).order_by(Device.last_seen.desc()).all()
