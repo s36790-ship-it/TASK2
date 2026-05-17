@@ -1,0 +1,1 @@
+self.last_device_count = 0

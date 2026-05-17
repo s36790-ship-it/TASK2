@@ -2,11 +2,19 @@ import customtkinter as ctk
 from tkinter import ttk
 import csv
 import os
+import ctypes
 from PIL import Image
 from tkinter import filedialog, messagebox
+from plyer import notification
 
 import arp_sniffer
 from database import Device, SessionLocal, init_db
+
+try:
+    myappid = "pjatk.passivenetworksentinel.project.1.0"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except Exception as e:
+    print(f"Nie udało się ustawić AppUserModelID: {e}")
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -20,6 +28,8 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+
+        self.last_device_count = 0
 
         image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../logo-rnd.png")
 
@@ -35,7 +45,7 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(4, weight=1)
+        self.sidebar.grid_rowconfigure(5, weight=1)
 
         if self.logo_image:
             self.logo_label = ctk.CTkLabel(self.sidebar, image=self.logo_image, text="")
@@ -53,9 +63,10 @@ class NetworkScannerGUI(ctk.CTk):
         self.btn_dashboard = ctk.CTkButton(
             self.sidebar, 
             text="Dashboard", 
-            fg_color="transparent", 
+            fg_color="#1f538d", 
             border_width=1,
-            hover_color="#14375e"
+            hover_color="#14375e",
+            command=self.show_dashboard
         )
         self.btn_dashboard.pack(pady=10, padx=20, fill="x")
 
@@ -63,9 +74,22 @@ class NetworkScannerGUI(ctk.CTk):
             self.sidebar,
             text="Ustawienia Skanera",
             fg_color="transparent",
-            border_width=1
+            border_width=1,
+            hover_color="#14375e",
+            command=self.show_settings
         )
         self.btn_settings.pack(pady=10, padx=20, fill="x")
+
+        self.btn_clear = ctk.CTkButton(
+            self.sidebar,
+            text="Wyczyść historię",
+            fg_color="transparent",
+            border_width=1,
+            hover_color="#c0392b",
+            border_color="#e74c3c",
+            command=self.clear_database_action
+        )
+        self.btn_clear.pack(pady=10, padx=20, fill="x")
 
         self.status_label = ctk.CTkLabel(
             self.sidebar, 
@@ -75,11 +99,21 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.status_label.pack(side="bottom", pady=20)
 
-        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.dashboard_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.settings_frame = ctk.CTkFrame(self, fg_color="transparent")
 
-        self.stats_frame = ctk.CTkFrame(self.main_frame, height=80)
-        self.stats_frame.pack(fill="x", pady=(0, 20))
+        self.build_dashboard_view()
+        self.build_settings_view()
+
+        self.show_dashboard()
+
+        init_db()
+        arp_sniffer.start_in_background()
+        self.update_data()
+
+    def build_dashboard_view(self):
+        self.stats_frame = ctk.CTkFrame(self.dashboard_frame, height=80)
+        self.stats_frame.pack(fill="x", pady=(0, 10))
         
         self.device_count_label = ctk.CTkLabel(
             self.stats_frame, 
@@ -88,11 +122,11 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.device_count_label.pack(side="left", padx=30, pady=20)
 
-        self.stats_frame = ctk.CTkFrame(self.main_frame, height=80)
-        self.stats_frame.pack(fill="x", pady=(0, 20))
+        self.stats_frame2 = ctk.CTkFrame(self.dashboard_frame, height=80)
+        self.stats_frame2.pack(fill="x", pady=(0, 20))
         
         self.total_events_label = ctk.CTkLabel(
-            self.stats_frame, 
+            self.stats_frame2, 
             text="Wszystkie zdarzenia: 0", 
             font=ctk.CTkFont(size=15, weight="bold")
         )
@@ -100,7 +134,7 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.setup_table_style()
 
-        self.table_container = ctk.CTkFrame(self.main_frame)
+        self.table_container = ctk.CTkFrame(self.dashboard_frame)
         self.table_container.pack(fill="both", expand=True)
 
         self.table = ttk.Treeview(
@@ -124,7 +158,7 @@ class NetworkScannerGUI(ctk.CTk):
         self.table.pack(fill="both", expand=True, padx=5, pady=5)
 
         self.export_btn = ctk.CTkButton(
-            self.main_frame, 
+            self.dashboard_frame, 
             text="Eksportuj Raport do CSV", 
             command=self.export_data,
             fg_color="#1f538d",
@@ -132,7 +166,99 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.export_btn.pack(pady=(20, 0))
 
-        self.update_data()
+    def build_settings_view(self):
+        title = ctk.CTkLabel(
+            self.settings_frame, 
+            text="Ustawienia Pasywnego Skanera sieci", 
+            font=ctk.CTkFont(size=22, weight="bold")
+        )
+        title.pack(pady=(10, 30), anchor="w", padx=20)
+
+        card = ctk.CTkFrame(self.settings_frame)
+        card.pack(fill="x", padx=20, pady=10)
+
+        label_iface = ctk.CTkLabel(
+            card, 
+            text="Wybierz interfejs sieciowy do nasłuchu:", 
+            font=ctk.CTkFont(size=14)
+        )
+        label_iface.pack(pady=(20, 5), padx=20, anchor="w")
+
+        self.iface_switch = ctk.CTkOptionMenu(
+            card,
+            values=["Automatyczny (Domyślna karta)", "Wi-Fi", "Ethernet", "Loopback"],
+            width=250
+        )
+        self.iface_switch.pack(pady=(0, 20), padx=20, anchor="w")
+
+        self.switch_notifications = ctk.CTkSwitch(
+            card, 
+            text="Powiadomienia systemowe o nowym MAC",
+            font=ctk.CTkFont(size=14)
+        )
+        self.switch_notifications.pack(pady=20, padx=20, anchor="w")
+
+        btn_save = ctk.CTkButton(
+            self.settings_frame,
+            text="Zapisz i zrestartuj skaner",
+            fg_color="#2ecc71",
+            hover_color="#27ae60",
+            command=self.save_settings_action
+        )
+        btn_save.pack(pady=30, padx=20, anchor="w")
+
+    def show_dashboard(self):
+        self.settings_frame.grid_forget()
+        self.dashboard_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.btn_dashboard.configure(fg_color="#1f538d")
+        self.btn_settings.configure(fg_color="transparent")
+
+    def show_settings(self):
+        self.dashboard_frame.grid_forget()
+        self.settings_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.btn_settings.configure(fg_color="#1f538d")
+        self.btn_dashboard.configure(fg_color="transparent")
+
+    def save_settings_action(self):
+        selected_iface = self.iface_switch.get()
+        
+        if self.switch_notifications.get() == 1:
+            try:
+                notification.notify(
+                    title="Passive Sentinel",
+                    message=f"Skaner przeładowany dla interfejsu: {selected_iface}",
+                    app_name="Passive Sentinel",
+                    timeout=5
+                )
+            except Exception as e:
+                print(f"Błąd wysyłania powiadomienia systemowego: {e}")
+
+        messagebox.showinfo(
+            "Ustawienia Skanera", 
+            f"Zapisano ustawienia!\nWybrany interfejs: {selected_iface}\nSkaner został przeładowany."
+        )
+
+    def clear_database_action(self):
+        confirm = messagebox.askyesno(
+            "Potwierdzenie czyszczenia", 
+            "Czy na pewno chcesz bezpowrotnie usunąć wszystkie wykryte urządzenia z bazy danych?"
+        )
+        if confirm:
+            try:
+                with SessionLocal() as session:
+                    session.query(Device).delete()
+                    session.commit()
+                
+                for i in self.table.get_children():
+                    self.table.delete(i)
+                
+                self.device_count_label.configure(text="Wykryte urządzenia: 0")
+                self.total_events_label.configure(text="Wszystkie zdarzenia: 0")
+                self.last_device_count = 0
+                
+                messagebox.showinfo("Sukces", "Baza danych i lista zostały wyczyszczone!")
+            except Exception as e:
+                messagebox.showerror("Błąd", f"Nie udało się wyczyścić bazy: {e}")
 
     def setup_table_style(self):
         style = ttk.Style()
@@ -149,27 +275,38 @@ class NetworkScannerGUI(ctk.CTk):
         style.map("Treeview", background=[('selected', '#1f538d')])
 
     def update_data(self):
-
-        """TUTAJ BACKEND I DB"""
-
         for i in self.table.get_children():
             self.table.delete(i)
             
-        """PRZYKŁADOWANE DANE JAK COŚ"""
-
-        mock_data = [
-            ("192.168.1.15", "AA:BB:CC:00:11:22", "Apple Inc.", "mDNS", "17:12:01"),
-            ("192.168.1.42", "BB:CC:DD:33:44:55", "Samsung Electronics", "SSDP", "17:12:45"),
-            ("192.168.1.101", "00:50:56:C0:00:08", "VMware", "ARP", "17:13:10")
-        ]
-        
-        for row in mock_data:
-            self.table.insert("", "end", values=row)
-
-        all_macs = [row[1] for row in mock_data]
-        unique_macs_count = len(set(all_macs))
+        try:
+            with SessionLocal() as session:
+                devices = session.query(Device).all()
+                for d in devices:
+                    formatted_time = d.last_seen.strftime("%H:%M:%S") if d.last_seen else "Nieznana"
+                    vendor_name = d.vendor if d.vendor else "Nieznany"
+                    row = (d.ip, d.mac, vendor_name, d.protocol, formatted_time)
+                    self.table.insert("", "end", values=row)
+        except Exception as e:
+            print(f"Błąd podczas pobierania danych z bazy: {e}")
             
-        self.device_count_label.configure(text=f"Wykryte urządzenia: {len(mock_data)}")
+        current_count = len(self.table.get_children())
+        
+        if self.last_device_count > 0 and current_count > self.last_device_count:
+            if self.switch_notifications.get() == 1:
+                try:
+                    notification.notify(
+                        title="Wykryto nowe urządzenie!",
+                        message="W sieci pojawił się nowy adres MAC. Sprawdź Dashboard.",
+                        app_name="Passive Sentinel",
+                        timeout=7
+                    )
+                except Exception as e:
+                    print(f"Błąd wysyłania powiadomienia: {e}")
+        
+        self.last_device_count = current_count
+        
+        self.device_count_label.configure(text=f"Wykryte urządzenia: {current_count}")
+        self.total_events_label.configure(text=f"Wszystkie zdarzenia: {current_count}")
         
         self.after(5000, self.update_data)
 
@@ -192,7 +329,7 @@ class NetworkScannerGUI(ctk.CTk):
             try:
                 with open(file_path, mode="w", newline="", encoding="utf-8") as file:
                     writer = csv.writer(file)
-                    writer.writerow(["Czas", "Protokół", "MAC", "IP", "Szczegóły"])
+                    writer.writerow(["Adres IP", "Adres MAC", "Producent", "Protokół", "Aktywność"])
                     writer.writerows(data_to_save)
                 messagebox.showinfo("Sukces", f"Zapisano pomyślnie")
             except Exception as e:
