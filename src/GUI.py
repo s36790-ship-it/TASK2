@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox
 from plyer import notification
 
 import arp_sniffer
-from database import Device, SessionLocal, init_db
+from database import Device, DHCPEvent, mDNSEvent, SessionLocal, init_db
 
 try:
     myappid = "pjatk.passivenetworksentinel.project.1.0"
@@ -24,7 +24,7 @@ class NetworkScannerGUI(ctk.CTk):
         super().__init__()
 
         self.title("Passive Network Sentinel - PJATK Project")
-        self.geometry("1100x650")
+        self.geometry("1200x700")  # Poprawiony format geometrii okna
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -32,64 +32,34 @@ class NetworkScannerGUI(ctk.CTk):
         self.last_device_count = 0
 
         image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "../logo-rnd.png")
-
         try:
-            self.logo_image = ctk.CTkImage(
-                light_image=Image.open(image_path),
-                dark_image=Image.open(image_path),
-                size=(300, 150)
-            )
+            self.logo_image = ctk.CTkImage(light_image=Image.open(image_path), dark_image=Image.open(image_path), size=(300, 150))
         except Exception as e:
-            print(f"Błąd ładowania logo: {e}")
+            print(f"Błąd logo: {e}")
             self.logo_image = None
 
+        # --- PANEL BOCZNY (SIDEBAR) ---
         self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(5, weight=1)
-
+        
         if self.logo_image:
             self.logo_label = ctk.CTkLabel(self.sidebar, image=self.logo_image, text="")
-        else:
-            self.logo_label = ctk.CTkLabel(self.sidebar, text="[BRAK LOGO]", text_color="red")
-        self.logo_label.pack(pady=(20, 10), padx=20)
+            self.logo_label.pack(pady=(20, 10), padx=20)
 
-        self.title_label = ctk.CTkLabel(
-            self.sidebar,
-            text="PASSIVE SENTINEL",
-            font=ctk.CTkFont(size=18, weight="bold")
-        )
-        self.title_label.pack(pady=(0, 30))
+        self.btn_dashboard = ctk.CTkButton(self.sidebar, text="Dashboard (Ogólny)", fg_color="#1f538d", command=self.show_dashboard)
+        self.btn_dashboard.pack(pady=8, padx=20, fill="x")
 
-        self.btn_dashboard = ctk.CTkButton(
-            self.sidebar, 
-            text="Dashboard", 
-            fg_color="#1f538d", 
-            border_width=1,
-            hover_color="#14375e",
-            command=self.show_dashboard
-        )
-        self.btn_dashboard.pack(pady=10, padx=20, fill="x")
+        self.btn_dhcp = ctk.CTkButton(self.sidebar, text="Analiza DHCP (OS)", fg_color="transparent", command=self.show_dhcp)
+        self.btn_dhcp.pack(pady=8, padx=20, fill="x")
 
-        self.btn_settings = ctk.CTkButton(
-            self.sidebar,
-            text="Ustawienia Skanera",
-            fg_color="transparent",
-            border_width=1,
-            hover_color="#14375e",
-            command=self.show_settings
-        )
-        self.btn_settings.pack(pady=10, padx=20, fill="x")
+        self.btn_mdns = ctk.CTkButton(self.sidebar, text="Usługi mDNS", fg_color="transparent", command=self.show_mdns)
+        self.btn_mdns.pack(pady=8, padx=20, fill="x")
 
-        self.btn_clear = ctk.CTkButton(
-            self.sidebar,
-            text="Wyczyść historię",
-            fg_color="transparent",
-            border_width=1,
-            hover_color="#c0392b",
-            border_color="#e74c3c",
-            command=self.clear_database_action
-        )
-        self.btn_clear.pack(pady=10, padx=20, fill="x")
+        self.btn_settings = ctk.CTkButton(self.sidebar, text="Ustawienia Skanera", fg_color="transparent", command=self.show_settings)
+        self.btn_settings.pack(pady=8, padx=20, fill="x")
+
+        self.btn_clear = ctk.CTkButton(self.sidebar, text="Wyczyść historię", fg_color="transparent", hover_color="#c0392b", border_color="#e74c3c", border_width=1, command=self.clear_database_action)
+        self.btn_clear.pack(pady=20, padx=20, fill="x")
 
         self.status_label = ctk.CTkLabel(
             self.sidebar, 
@@ -99,18 +69,26 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.status_label.pack(side="bottom", pady=20)
 
+        # --- RAMKI WIDOKÓW (WIDGETY KONTENERY) ---
         self.dashboard_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.dhcp_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.mdns_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.settings_frame = ctk.CTkFrame(self, fg_color="transparent")
 
+        # Budowanie komponentów wewnątrz ramek
         self.build_dashboard_view()
+        self.build_dhcp_view()
+        self.build_mdns_view()
         self.build_settings_view()
 
+        self.setup_table_style()
         self.show_dashboard()
 
         init_db()
         arp_sniffer.start_in_background()
         self.update_data()
 
+    # --- WIDOK: DASHBOARD ---
     def build_dashboard_view(self):
         self.stats_frame = ctk.CTkFrame(self.dashboard_frame, height=80)
         self.stats_frame.pack(fill="x", pady=(0, 10))
@@ -131,26 +109,6 @@ class NetworkScannerGUI(ctk.CTk):
             font=ctk.CTkFont(size=15, weight="bold")
         )
         self.total_events_label.pack(side="left", padx=30, pady=20)
-
-        self.filter_frame = ctk.CTkFrame(self.dashboard_frame, height=40)
-        self.filter_frame.pack(fill="x", pady=(0, 15))
-
-        self.filter_label = ctk.CTkLabel(self.filter_frame, text="Filtruj protokoły:", font=ctk.CTkFont(size=12, weight="bold"))
-        self.filter_label.pack(side="left", padx=20, pady=10)
-
-        self.filter_arp = ctk.CTkCheckBox(self.filter_frame, text="ARP", command=self.update_data)
-        self.filter_arp.pack(side="left", padx=15)
-        self.filter_arp.select()
-
-        self.filter_dhcp = ctk.CTkCheckBox(self.filter_frame, text="DHCP", command=self.update_data)
-        self.filter_dhcp.pack(side="left", padx=15)
-        self.filter_dhcp.select()
-
-        self.filter_mdns = ctk.CTkCheckBox(self.filter_frame, text="mDNS", command=self.update_data)
-        self.filter_mdns.pack(side="left", padx=15)
-        self.filter_mdns.select()
-
-        self.setup_table_style()
 
         self.table_container = ctk.CTkFrame(self.dashboard_frame)
         self.table_container.pack(fill="both", expand=True)
@@ -184,13 +142,43 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.export_btn.pack(pady=(20, 0))
 
+    # --- WIDOK: DHCP ---
+    def build_dhcp_view(self):
+        lbl = ctk.CTkLabel(self.dhcp_frame, text="Głęboka Inspekcja DHCP i Rozpoznawanie Systemów (OS Fingerprinting)", font=ctk.CTkFont(size=18, weight="bold"))
+        lbl.pack(pady=10, anchor="w", padx=10)
+        
+        self.table_dhcp = ttk.Treeview(self.dhcp_frame, columns=("MAC", "ReqIP", "Hostname", "Type", "Option55", "OS", "Time"), show="headings")
+        self.table_dhcp.heading("MAC", text="Adres MAC")
+        self.table_dhcp.heading("ReqIP", text="Żądane IP")
+        self.table_dhcp.heading("Hostname", text="Nazwa urządzenia")
+        self.table_dhcp.heading("Type", text="Typ komunikatu")
+        self.table_dhcp.heading("Option55", text="Opcja 55 (PRL)")
+        self.table_dhcp.heading("OS", text="Wykryty System OS")
+        self.table_dhcp.heading("Time", text="Czas zdarzenia")
+        
+        self.table_dhcp.column("Option55", width=150, stretch=False, anchor="center")
+        self.table_dhcp.column("OS", width=150, stretch=False, anchor="center")
+        self.table_dhcp.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # --- WIDOK: mDNS ---
+    def build_mdns_view(self):
+        lbl = ctk.CTkLabel(self.mdns_frame, text="Wykryte Rekordy mDNS i Rozgłaszane Usługi Sieciowe", font=ctk.CTkFont(size=18, weight="bold"))
+        lbl.pack(pady=10, anchor="w", padx=10)
+        
+        self.table_mdns = ttk.Treeview(self.mdns_frame, columns=("IP", "MAC", "Hostname", "Services", "Time"), show="headings")
+        self.table_mdns.heading("IP", text="Adres IP")
+        self.table_mdns.heading("MAC", text="Adres MAC")
+        self.table_mdns.heading("Hostname", text="Nazwa domeny (.local)")
+        self.table_mdns.heading("Services", text="Aktywne usługi na urządzeniu")
+        self.table_mdns.heading("Time", text="Czas")
+        
+        self.table_mdns.column("Services", width=400, stretch=True)
+        self.table_mdns.pack(fill="both", expand=True, padx=10, pady=10)
+
+    # --- WIDOK: SETTINGS ---
     def build_settings_view(self):
-        title = ctk.CTkLabel(
-            self.settings_frame, 
-            text="Ustawienia Pasywnego Skanera sieci", 
-            font=ctk.CTkFont(size=22, weight="bold")
-        )
-        title.pack(pady=(10, 30), anchor="w", padx=20)
+        title = ctk.CTkLabel(self.settings_frame, text="Ustawienia Skanera", font=ctk.CTkFont(size=18, weight="bold"))
+        title.pack(pady=10, padx=10, anchor="w")
 
         card = ctk.CTkFrame(self.settings_frame)
         card.pack(fill="x", padx=20, pady=10)
@@ -225,17 +213,40 @@ class NetworkScannerGUI(ctk.CTk):
         )
         btn_save.pack(pady=30, padx=20, anchor="w")
 
+    # --- LOGIKA NAWIGACJI PANELU BOCZNEGO ---
+    def hide_all_frames(self):
+        """Pomocnicza metoda ukrywająca wszystkie widoki przed przełączeniem"""
+        for frame in [self.dashboard_frame, self.dhcp_frame, self.mdns_frame, self.settings_frame]:
+            frame.grid_forget()
+
+    def clear_active_buttons(self):
+        """Resetuje kolor tła wszystkich przycisków w menu bocznym"""
+        for btn in [self.btn_dashboard, self.btn_dhcp, self.btn_mdns, self.btn_settings]:
+            btn.configure(fg_color="transparent")
+
     def show_dashboard(self):
-        self.settings_frame.grid_forget()
+        self.hide_all_frames()
+        self.clear_active_buttons()
         self.dashboard_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.btn_dashboard.configure(fg_color="#1f538d")
-        self.btn_settings.configure(fg_color="transparent")
+
+    def show_dhcp(self):
+        self.hide_all_frames()
+        self.clear_active_buttons()
+        self.dhcp_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.btn_dhcp.configure(fg_color="#1f538d")
+
+    def show_mdns(self):
+        self.hide_all_frames()
+        self.clear_active_buttons()
+        self.mdns_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.btn_mdns.configure(fg_color="#1f538d")
 
     def show_settings(self):
-        self.dashboard_frame.grid_forget()
+        self.hide_all_frames()
+        self.clear_active_buttons()
         self.settings_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.btn_settings.configure(fg_color="#1f538d")
-        self.btn_dashboard.configure(fg_color="transparent")
 
     def save_settings_action(self):
         selected_iface = self.iface_switch.get()
@@ -259,24 +270,28 @@ class NetworkScannerGUI(ctk.CTk):
     def clear_database_action(self):
         confirm = messagebox.askyesno(
             "Potwierdzenie czyszczenia", 
-            "Czy na pewno chcesz bezpowrotnie usunąć wszystkie wykryte urządzenia z bazy danych?"
+            "Czy na pewno chcesz bezpowrotnie usunąć całą historię ze wszystkich tabel bazy danych?"
         )
         if confirm:
             try:
                 with SessionLocal() as session:
                     session.query(Device).delete()
+                    session.query(DHCPEvent).delete()
+                    session.query(mDNSEvent).delete()
                     session.commit()
                 
-                for i in self.table.get_children():
-                    self.table.delete(i)
+                # Wyczyszczenie widoków tabelarycznych na ekranie
+                for t in [self.table, self.table_dhcp, self.table_mdns]:
+                    for i in t.get_children():
+                        t.delete(i)
                 
                 self.device_count_label.configure(text="Wykryte urządzenia: 0")
                 self.total_events_label.configure(text="Wszystkie zdarzenia: 0")
                 self.last_device_count = 0
                 
-                messagebox.showinfo("Sukces", "Baza danych i lista zostały wyczyszczone!")
+                messagebox.showinfo("Sukces", "Wszystkie bazy danych i listy zostały wyczyszczone!")
             except Exception as e:
-                messagebox.showerror("Błąd", f"Nie udało się wyczyścić bazy: {e}")
+                messagebox.showerror("Błąd", f"Nie udało się wyczyścić baz danych: {e}")
 
     def setup_table_style(self):
         style = ttk.Style()
@@ -292,35 +307,52 @@ class NetworkScannerGUI(ctk.CTk):
         style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat")
         style.map("Treeview", background=[('selected', '#1f538d')])
 
+    # --- SEKCJA AUTOMATYCZNEGO ODŚWIEŻANIA DANYCH Z MODELI ---
     def update_data(self):
-        for i in self.table.get_children():
-            self.table.delete(i)
+        # 1. Czyszczenie zawartości trzech tabel przed załadowaniem świeżych danych
+        for t in [self.table, self.table_dhcp, self.table_mdns]:
+            for i in t.get_children():
+                t.delete(i)
             
-        allowed_protocols = []
-        if self.filter_arp.get() == 1: allowed_protocols.append("ARP")
-        if self.filter_dhcp.get() == 1: allowed_protocols.append("DHCP")
-        if self.filter_mdns.get() == 1: allowed_protocols.append("mDNS")
-        
         unique_macs = set()
         total_events = 0
 
         try:
             with SessionLocal() as session:
+                # [TABELA 1] Zasilanie Dashboardu z modelu Device
                 devices = session.query(Device).all()
                 for d in devices:
-                    if d.protocol in allowed_protocols:
-                        formatted_time = d.last_seen.strftime("%H:%M:%S") if d.last_seen else "Nieznana"
-                        vendor_name = d.vendor if d.vendor else "Wykryto"
-                        row = (d.ip, d.mac, vendor_name, d.protocol, formatted_time)
-                        self.table.insert("", "end", values=row)
-                        
-                        unique_macs.add(d.mac)
-                        total_events += 1
+                    formatted_time = d.last_seen.strftime("%H:%M:%S") if d.last_seen else "Nieznana"
+                    vendor_name = d.vendor if d.vendor else "Wykryto"
+                    row = (d.ip, d.mac, vendor_name, d.protocol, formatted_time)
+                    self.table.insert("", "end", values=row)
+                    
+                    unique_macs.add(d.mac)
+                    total_events += 1
+
+                # [TABELA 2] Zasilanie zakładki DHCP z dedykowanego modelu DHCPEvent
+                dhcp_records = session.query(DHCPEvent).all()
+                for dhcp in dhcp_records:
+                    t_time = dhcp.timestamp.strftime("%H:%M:%S") if dhcp.timestamp else "Nieznana"
+                    row_dhcp = (dhcp.mac, dhcp.requested_ip, dhcp.hostname, dhcp.message_type, dhcp.parameter_request_list, dhcp.predicted_os, t_time)
+                    self.table_dhcp.insert("", "end", values=row_dhcp)
+                    unique_macs.add(dhcp.mac)
+
+                # [TABELA 3] Zasilanie zakładki mDNS z dedykowanego modelu mDNSEvent
+                mdns_records = session.query(mDNSEvent).all()
+                for mdns in mdns_records:
+                    m_time = mdns.timestamp.strftime("%H:%M:%S") if mdns.timestamp else "Nieznana"
+                    row_mdns = (mdns.ip, mdns.mac, mdns.hostname, mdns.services, m_time)
+                    self.table_mdns.insert("", "end", values=row_mdns)
+                    if mdns.mac:
+                        unique_macs.add(mdns.mac)
+
         except Exception as e:
-            print(f"Błąd podczas pobierania danych z bazy: {e}")
+            print(f"Błąd podczas pobierania danych z baz: {e}")
             
         current_unique_count = len(unique_macs)
         
+        # Logika wyskakujących powiadomień systemowych
         if self.last_device_count > 0 and current_unique_count > self.last_device_count:
             if self.switch_notifications.get() == 1:
                 try:
