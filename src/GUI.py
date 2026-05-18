@@ -15,7 +15,9 @@ from plyer import notification
 _ROW_LIMIT = 500
 
 import sniffers.arp_sniffer as arp_sniffer
+import sniffers.dhcp_sniffer as dhcp_sniffer
 import sniffers.dns_sniffer as dns_sniffer
+import sniffers.mdns_sniffer as mdns_sniffer
 import sniffers.ssdp_sniffer as ssdp_sniffer
 import sniffers.tls_sniffer as tls_sniffer
 from database import Device, DHCPEvent, DNSEvent, mDNSEvent, SSDPEvent, TLSEvent, SessionLocal, init_db
@@ -134,17 +136,6 @@ class NetworkScannerGUI(ctk.CTk):
         self.btn_clear = ctk.CTkButton(self.sidebar, text="Wyczyść historię", fg_color="transparent", hover_color="#c0392b", border_color="#e74c3c", border_width=1, command=self.clear_database_action)
         self.btn_clear.pack(pady=20, padx=20, fill="x")
 
-        self.btn_clear = ctk.CTkButton(
-            self.sidebar,
-            text="Wyczyść historię",
-            fg_color="transparent",
-            border_width=1,
-            hover_color="#c0392b",
-            border_color="#e74c3c",
-            command=self.clear_database_action
-        )
-        self.btn_clear.pack(pady=10, padx=20, fill="x")
-
         self.status_label = ctk.CTkLabel(
             self.sidebar, 
             text="● Skanowanie aktywne", 
@@ -177,6 +168,8 @@ class NetworkScannerGUI(ctk.CTk):
 
         init_db()
         arp_sniffer.start_in_background()
+        dhcp_sniffer.start_in_background()
+        mdns_sniffer.start_in_background()
         ssdp_sniffer.start_in_background()
         dns_sniffer.start_in_background()
         tls_sniffer.start_in_background()
@@ -187,12 +180,6 @@ class NetworkScannerGUI(ctk.CTk):
         self.stats_frame.pack(fill="x", pady=(0, 10))
 
         self.show_dashboard()
-
-        init_db()
-        arp_sniffer.start_in_background()
-        dhcp_sniffer.start_in_background()
-        mdns_sniffer.start_in_background()
-        self.update_data()
 
     def build_dashboard_view(self):
         self.stats_frame = ctk.CTkFrame(self.dashboard_frame, height=80)
@@ -441,6 +428,8 @@ class NetworkScannerGUI(ctk.CTk):
             errors: list[str] = []
             for name, mod in [
                 ("ARP", arp_sniffer),
+                ("DHCP", dhcp_sniffer),
+                ("mDNS", mdns_sniffer),
                 ("SSDP", ssdp_sniffer),
                 ("DNS", dns_sniffer),
                 ("TLS", tls_sniffer),
