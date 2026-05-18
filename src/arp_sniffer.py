@@ -11,15 +11,10 @@ from database import Device, SessionLocal, init_db, utcnow
 __all__ = ["start", "start_in_background"]
 
 
-def _upsert(ip: str, mac: str) -> None:
     # Dodaje nowe urządzenie, albo aktualizuje IP + last_seen, jeśli MAC już jest w bazie.
+def _upsert(ip: str, mac: str) -> None:
     with SessionLocal() as session:
-        device = session.query(Device).filter_by(mac=mac).first()
-        if device is None:
-            session.add(Device(ip=ip, mac=mac, protocol="ARP", last_seen=utcnow()))
-        else:
-            device.ip = ip
-            device.last_seen = utcnow()
+        session.add(Device(ip=ip, mac=mac, protocol="ARP", last_seen=utcnow()))
         session.commit()
 
 
