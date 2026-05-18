@@ -15,7 +15,9 @@ from plyer import notification
 _ROW_LIMIT = 500
 
 import sniffers.arp_sniffer as arp_sniffer
+import sniffers.dhcp_sniffer as dhcp_sniffer
 import sniffers.dns_sniffer as dns_sniffer
+import sniffers.mdns_sniffer as mdns_sniffer
 import sniffers.ssdp_sniffer as ssdp_sniffer
 import sniffers.tls_sniffer as tls_sniffer
 from database import Device, DHCPEvent, DNSEvent, mDNSEvent, SSDPEvent, TLSEvent, SessionLocal, init_db
@@ -68,6 +70,12 @@ def _detect_ifaces() -> dict[str, str | None]:
             pass
 
     return mapping
+
+try:
+    myappid = "pjatk.passivenetworksentinel.project.1.0"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except Exception as e:
+    print(f"Nie udało się ustawić AppUserModelID: {e}")
 
 try:
     myappid = "pjatk.passivenetworksentinel.project.1.0"
@@ -129,8 +137,8 @@ class NetworkScannerGUI(ctk.CTk):
         self.btn_clear.pack(pady=20, padx=20, fill="x")
 
         self.status_label = ctk.CTkLabel(
-            self.sidebar,
-            text="● Skanowanie aktywne",
+            self.sidebar, 
+            text="● Skanowanie aktywne", 
             text_color="#2ecc71",
             font=ctk.CTkFont(size=12)
         )
@@ -160,6 +168,8 @@ class NetworkScannerGUI(ctk.CTk):
 
         init_db()
         arp_sniffer.start_in_background()
+        dhcp_sniffer.start_in_background()
+        mdns_sniffer.start_in_background()
         ssdp_sniffer.start_in_background()
         dns_sniffer.start_in_background()
         tls_sniffer.start_in_background()
@@ -169,9 +179,15 @@ class NetworkScannerGUI(ctk.CTk):
         self.stats_frame = ctk.CTkFrame(self.dashboard_frame, height=80)
         self.stats_frame.pack(fill="x", pady=(0, 10))
 
+        self.show_dashboard()
+
+    def build_dashboard_view(self):
+        self.stats_frame = ctk.CTkFrame(self.dashboard_frame, height=80)
+        self.stats_frame.pack(fill="x", pady=(0, 10))
+        
         self.device_count_label = ctk.CTkLabel(
-            self.stats_frame,
-            text="Wykryte urządzenia: 0",
+            self.stats_frame, 
+            text="Wykryte urządzenia: 0", 
             font=ctk.CTkFont(size=16, weight="bold")
         )
         self.device_count_label.pack(side="left", padx=30, pady=20)
@@ -190,11 +206,11 @@ class NetworkScannerGUI(ctk.CTk):
         self.table_container.pack(fill="both", expand=True)
 
         self.table = ttk.Treeview(
-            self.table_container,
-            columns=("IP", "MAC", "Vendor", "Protocol", "Last Seen"),
+            self.table_container, 
+            columns=("IP", "MAC", "Vendor", "Protocol", "Last Seen"), 
             show="headings"
         )
-
+        
         self.table.heading("IP", text="Adres IP")
         self.table.heading("MAC", text="Adres MAC")
         self.table.heading("Vendor", text="Producent")
@@ -412,6 +428,8 @@ class NetworkScannerGUI(ctk.CTk):
             errors: list[str] = []
             for name, mod in [
                 ("ARP", arp_sniffer),
+                ("DHCP", dhcp_sniffer),
+                ("mDNS", mdns_sniffer),
                 ("SSDP", ssdp_sniffer),
                 ("DNS", dns_sniffer),
                 ("TLS", tls_sniffer),
