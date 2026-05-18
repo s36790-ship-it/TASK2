@@ -20,7 +20,15 @@ import sniffers.dns_sniffer as dns_sniffer
 import sniffers.mdns_sniffer as mdns_sniffer
 import sniffers.ssdp_sniffer as ssdp_sniffer
 import sniffers.tls_sniffer as tls_sniffer
+import pcap_loader
+from pcap_watcher import PcapWatcher
 from database import Device, DHCPEvent, DNSEvent, mDNSEvent, SSDPEvent, TLSEvent, SessionLocal, init_db
+
+
+def _default_watch_directory() -> str:
+    if sys.platform == "darwin":
+        return "/var/tmp"
+    return os.path.expanduser("~")
 
 
 def _detect_ifaces() -> dict[str, str | None]:
@@ -146,6 +154,10 @@ class NetworkScannerGUI(ctk.CTk):
 
         self.iface_map = _detect_ifaces()
         self.current_iface_label = next(iter(self.iface_map))
+
+        self.pcap_watcher = PcapWatcher(_default_watch_directory())
+        self.pcap_watcher.on_loaded = self._on_watcher_loaded
+        self.pcap_watcher.on_error = self._on_watcher_error
 
         self.dashboard_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.dhcp_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -309,6 +321,63 @@ class NetworkScannerGUI(ctk.CTk):
         lbl = ctk.CTkLabel(self.tls_frame, text="Przechwycone TLS ClientHello (SNI + fingerprint JA3)", font=ctk.CTkFont(size=18, weight="bold"))
         lbl.pack(pady=10, anchor="w", padx=10)
 
+        control_row = ctk.CTkFrame(self.tls_frame, fg_color="transparent")
+        control_row.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.btn_monitor = ctk.CTkButton(
+            control_row,
+            text="Włącz monitor mode",
+            width=200,
+            fg_color="#1f538d",
+            hover_color="#14375e",
+            command=self.toggle_monitor_mode,
+        )
+        self.btn_monitor.pack(side="left")
+
+        self.btn_load_pcap = ctk.CTkButton(
+            control_row,
+            text="Załaduj pcap…",
+            width=160,
+            fg_color="#16a085",
+            hover_color="#117a65",
+            command=self.load_pcap_action,
+        )
+        self.btn_load_pcap.pack(side="left", padx=(10, 0))
+
+        self.monitor_status = ctk.CTkLabel(
+            control_row,
+            text="Tryb normalny",
+            font=ctk.CTkFont(size=12),
+            text_color="#aaaaaa",
+        )
+        self.monitor_status.pack(side="left", padx=15)
+
+        # Druga linia: watcher katalogu z pcap-ami (głównie /var/tmp pisany przez
+        # Wireless Diagnostics → Sniffer). Włączony auto-ładuje każdy nowy plik gdy zostanie
+        # zamknięty (brak modyfikacji przez 3s).
+        watch_row = ctk.CTkFrame(self.tls_frame, fg_color="transparent")
+        watch_row.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.switch_pcap_watch = ctk.CTkSwitch(
+            watch_row,
+            text=f"Auto-monitoruj nowe pcap w {self.pcap_watcher.directory}",
+            command=self.toggle_pcap_watch,
+            font=ctk.CTkFont(size=12),
+        )
+        self.switch_pcap_watch.pack(side="left")
+
+        self.pcap_watch_status = ctk.CTkLabel(
+            watch_row,
+            text="(wyłączony)",
+            font=ctk.CTkFont(size=11),
+            text_color="#888888",
+        )
+        self.pcap_watch_status.pack(side="left", padx=15)
+
+        # Cykliczne odświeżanie pokazuje, czy tshark w ogóle dostarcza ramki, czy są zaszyfrowane,
+        # i ile ClientHello udało się sparsować. Pozwala szybko zdiagnozować, gdzie pipeline stoi.
+        self._refresh_tls_stats()
+
         self.table_tls = ttk.Treeview(self.tls_frame, columns=("IP", "SNI", "ALPN", "JA3", "Time"), show="headings")
         self.table_tls.heading("IP", text="Adres IP klienta")
         self.table_tls.heading("SNI", text="SNI (host docelowy)")
@@ -351,6 +420,59 @@ class NetworkScannerGUI(ctk.CTk):
             font=ctk.CTkFont(size=14)
         )
         self.switch_notifications.pack(pady=20, padx=20, anchor="w")
+
+        wpa_card = ctk.CTkFrame(self.settings_frame)
+        wpa_card.pack(fill="x", padx=20, pady=10)
+
+        wpa_label = ctk.CTkLabel(
+            wpa_card,
+            text="Klucze do deszyfracji pcap (WPA2/WPA3 Personal):",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        wpa_label.pack(pady=(15, 5), padx=20, anchor="w")
+
+        wpa_hint = ctk.CTkLabel(
+            wpa_card,
+            text="Używane tylko przy 'Załaduj pcap…' w widoku TLS. Hasło trzymane jest tylko w pamięci.",
+            font=ctk.CTkFont(size=11),
+            text_color="#888888",
+        )
+        wpa_hint.pack(pady=(0, 8), padx=20, anchor="w")
+
+        self.wpa_ssid_entry = ctk.CTkEntry(
+            wpa_card,
+            placeholder_text="SSID sieci",
+            width=320,
+        )
+        self.wpa_ssid_entry.pack(pady=(0, 8), padx=20, anchor="w")
+
+        self.wpa_password_entry = ctk.CTkEntry(
+            wpa_card,
+            placeholder_text="Hasło Wi-Fi",
+            width=320,
+            show="*",
+        )
+        self.wpa_password_entry.pack(pady=(0, 8), padx=20, anchor="w")
+
+        self.wpa_channel_entry = ctk.CTkEntry(
+            wpa_card,
+            placeholder_text="Kanał Wi-Fi (np. 36) — opcjonalny, tylko monitor mode",
+            width=320,
+        )
+        self.wpa_channel_entry.pack(pady=(0, 5), padx=20, anchor="w")
+
+        channel_hint = ctk.CTkLabel(
+            wpa_card,
+            text=(
+                "Kanał działa tylko na Linux (przez 'iw dev … set channel'). "
+                "macOS 14.4+ usunął airport CLI — kanał ustawiaj ręcznie w Wireless Diagnostics."
+            ),
+            font=ctk.CTkFont(size=11),
+            text_color="#888888",
+            wraplength=320,
+            justify="left",
+        )
+        channel_hint.pack(pady=(0, 15), padx=20, anchor="w")
 
         self.btn_save = ctk.CTkButton(
             self.settings_frame,
@@ -412,6 +534,172 @@ class NetworkScannerGUI(ctk.CTk):
         self.clear_active_buttons()
         self.settings_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.btn_settings.configure(fg_color="#1f538d")
+
+    def load_pcap_action(self):
+        path = filedialog.askopenfilename(
+            title="Wybierz plik pcap",
+            filetypes=[("Pliki pcap", "*.pcap *.pcapng *.cap"), ("Wszystkie pliki", "*.*")],
+            initialdir="/var/tmp",
+        )
+        if not path:
+            return
+
+        # WPA password + SSID są opcjonalne: jeśli oba puste, ładujemy w trybie plaintext.
+        # Jeśli tylko jedno wypełnione, ostrzegamy — to prawie na pewno pomyłka.
+        password = self.wpa_password_entry.get().strip()
+        ssid = self.wpa_ssid_entry.get().strip()
+        if bool(password) != bool(ssid):
+            messagebox.showwarning(
+                "Załaduj pcap",
+                "Podaj zarówno hasło, jak i SSID (Ustawienia), albo zostaw oba puste.",
+            )
+            return
+
+        self.btn_load_pcap.configure(state="disabled", text="Przetwarzanie…")
+
+        def worker() -> None:
+            error: str | None = None
+            stats: dict[str, int] | None = None
+            try:
+                stats = pcap_loader.load_pcap(
+                    path,
+                    password=password or None,
+                    ssid=ssid or None,
+                )
+            except pcap_loader.PcapLoadError as e:
+                error = str(e)
+            except Exception as e:
+                error = f"Niespodziewany błąd: {e}"
+            self.after(0, lambda: self._on_pcap_load_done(path, stats, error, bool(password)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_pcap_load_done(self, path: str, stats: dict[str, int] | None, error: str | None, decrypted: bool) -> None:
+        self.btn_load_pcap.configure(state="normal", text="Załaduj pcap…")
+        if error is not None:
+            messagebox.showerror("Załaduj pcap", error)
+            return
+        decryption_note = " (po deszyfracji WPA przez tshark)" if decrypted else ""
+        total = stats["total"] if stats else 0
+        errors = stats.get("errors", 0) if stats else 0
+        err_note = f"\nOdrzucono {errors} pakietów (błędy parsowania)." if errors else ""
+        messagebox.showinfo(
+            "Załaduj pcap",
+            f"Wczytano {total} pakietów z {os.path.basename(path)}{decryption_note}."
+            f"{err_note}\nTabele odświeżą się przy następnym cyklu (5s).",
+        )
+
+    def toggle_monitor_mode(self):
+        new_state = not tls_sniffer.is_monitor_mode()
+        if new_state:
+            if not messagebox.askyesno(
+                "Monitor mode",
+                "Włączenie monitor mode rozłączy Wi-Fi tego hosta. Bez podania hasła "
+                "Wi-Fi + SSID w Ustawieniach nie zobaczysz zaszyfrowanego ruchu WPA2/WPA3. "
+                "Kontynuować?",
+            ):
+                return
+            # Przekazujemy aktualne dane WPA + kanał z ustawień, żeby tshark w monitor mode
+            # mógł deszyfrować ruch na bieżąco i zablokować się na właściwym kanale (Linux).
+            try:
+                tls_sniffer.set_wpa_credentials(
+                    self.wpa_password_entry.get().strip(),
+                    self.wpa_ssid_entry.get().strip(),
+                )
+                channel_text = self.wpa_channel_entry.get().strip()
+                channel = int(channel_text) if channel_text else None
+                tls_sniffer.set_channel(channel)
+            except AttributeError:
+                pass  # pola jeszcze nie zbudowane (np. start aplikacji)
+            except ValueError:
+                messagebox.showwarning(
+                    "Monitor mode",
+                    f"Kanał '{self.wpa_channel_entry.get()}' nie jest liczbą — pomijam.",
+                )
+                tls_sniffer.set_channel(None)
+
+        # set_monitor_mode() blokuje na czas AsyncSniffer.stop() — odpalamy w tle.
+        self.btn_monitor.configure(state="disabled", text="Przełączanie…")
+
+        def worker() -> None:
+            error: str | None = None
+            try:
+                tls_sniffer.set_monitor_mode(new_state)
+            except Exception as e:
+                error = str(e)
+            self.after(0, lambda: self._on_monitor_toggle_done(new_state, error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_monitor_toggle_done(self, new_state: bool, error: str | None) -> None:
+        self.btn_monitor.configure(state="normal")
+        if error is not None:
+            messagebox.showerror("Monitor mode", f"Nie udało się przełączyć: {error}")
+            # przywróć poprzedni wygląd przycisku
+            current = tls_sniffer.is_monitor_mode()
+            self._update_monitor_button(current)
+            return
+        self._update_monitor_button(new_state)
+
+    def toggle_pcap_watch(self) -> None:
+        # Aktualizuj credentials zanim zaczniemy nasłuchiwać — watcher używa ich do dekrypcji.
+        try:
+            self.pcap_watcher.set_credentials(
+                self.wpa_password_entry.get().strip(),
+                self.wpa_ssid_entry.get().strip(),
+            )
+        except AttributeError:
+            pass
+
+        if self.switch_pcap_watch.get() == 1:
+            self.pcap_watcher.start()
+            self.pcap_watch_status.configure(
+                text=f"aktywny — nasłuchuje {self.pcap_watcher.directory}",
+                text_color="#16a085",
+            )
+        else:
+            self.pcap_watcher.stop()
+            self.pcap_watch_status.configure(text="(wyłączony)", text_color="#888888")
+
+    def _on_watcher_loaded(self, path: str, stats: dict[str, int]) -> None:
+        # Watcher woła to z wątku tła — wracamy na główny wątek przez self.after().
+        self.after(0, lambda: self._show_watcher_loaded(path, stats))
+
+    def _show_watcher_loaded(self, path: str, stats: dict[str, int]) -> None:
+        self.pcap_watch_status.configure(
+            text=f"wczytano {os.path.basename(path)} — {stats.get('total', 0)} pakietów",
+            text_color="#16a085",
+        )
+
+    def _on_watcher_error(self, path: str, error: str) -> None:
+        self.after(0, lambda: self._show_watcher_error(path, error))
+
+    def _show_watcher_error(self, path: str, error: str) -> None:
+        short = error.splitlines()[0][:120] if error else ""
+        self.pcap_watch_status.configure(
+            text=f"błąd ({os.path.basename(path)}): {short}",
+            text_color="#e74c3c",
+        )
+
+    def _refresh_tls_stats(self) -> None:
+        # Liczniki z live tshark: ile ramek scapy dostał, ile zdekodowało się do TCP,
+        # ile było ClientHello. Pokazują, gdzie utyka pipeline (tshark, dissektor, parser).
+        stats = tls_sniffer.get_stats()
+        monitor = tls_sniffer.is_monitor_mode()
+        mode_text = "Monitor mode" if monitor else "Tryb normalny"
+        self.monitor_status.configure(
+            text=f"{mode_text}  •  ramki: {stats['frames']}  •  z TCP: {stats['tcp']}  •  ClientHello: {stats['client_hellos']}",
+            text_color="#e74c3c" if monitor else "#aaaaaa",
+        )
+        self.after(1000, self._refresh_tls_stats)
+
+    def _update_monitor_button(self, monitor: bool) -> None:
+        # Etykietę statusu (z licznikami) odświeża _refresh_tls_stats() co sekundę,
+        # tutaj zmieniamy tylko wygląd przycisku.
+        if monitor:
+            self.btn_monitor.configure(text="Wyłącz monitor mode", fg_color="#c0392b", hover_color="#a02818")
+        else:
+            self.btn_monitor.configure(text="Włącz monitor mode", fg_color="#1f538d", hover_color="#14375e")
 
     def save_settings_action(self):
         selected_label = self.iface_switch.get()
