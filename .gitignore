@@ -2,3 +2,4 @@
 __pycache__
 *.db
 .python-version
+src/__pycache__
