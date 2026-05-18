@@ -293,6 +293,27 @@ class NetworkScannerGUI(ctk.CTk):
         lbl = ctk.CTkLabel(self.tls_frame, text="Przechwycone TLS ClientHello (SNI + fingerprint JA3)", font=ctk.CTkFont(size=18, weight="bold"))
         lbl.pack(pady=10, anchor="w", padx=10)
 
+        control_row = ctk.CTkFrame(self.tls_frame, fg_color="transparent")
+        control_row.pack(fill="x", padx=10, pady=(0, 10))
+
+        self.btn_monitor = ctk.CTkButton(
+            control_row,
+            text="Włącz monitor mode",
+            width=200,
+            fg_color="#1f538d",
+            hover_color="#14375e",
+            command=self.toggle_monitor_mode,
+        )
+        self.btn_monitor.pack(side="left")
+
+        self.monitor_status = ctk.CTkLabel(
+            control_row,
+            text="Tryb normalny (widzisz tylko ruch swojego hosta)",
+            font=ctk.CTkFont(size=12),
+            text_color="#aaaaaa",
+        )
+        self.monitor_status.pack(side="left", padx=15)
+
         self.table_tls = ttk.Treeview(self.tls_frame, columns=("IP", "SNI", "ALPN", "JA3", "Time"), show="headings")
         self.table_tls.heading("IP", text="Adres IP klienta")
         self.table_tls.heading("SNI", text="SNI (host docelowy)")
@@ -396,6 +417,53 @@ class NetworkScannerGUI(ctk.CTk):
         self.clear_active_buttons()
         self.settings_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         self.btn_settings.configure(fg_color="#1f538d")
+
+    def toggle_monitor_mode(self):
+        new_state = not tls_sniffer.is_monitor_mode()
+        if new_state:
+            if not messagebox.askyesno(
+                "Monitor mode",
+                "Włączenie monitor mode rozłączy Wi-Fi tego hosta i nie zobaczysz "
+                "zaszyfrowanego ruchu WPA2/WPA3 bez znanego klucza sieci. Kontynuować?",
+            ):
+                return
+
+        # set_monitor_mode() blokuje na czas AsyncSniffer.stop() — odpalamy w tle.
+        self.btn_monitor.configure(state="disabled", text="Przełączanie…")
+
+        def worker() -> None:
+            error: str | None = None
+            try:
+                tls_sniffer.set_monitor_mode(new_state)
+            except Exception as e:
+                error = str(e)
+            self.after(0, lambda: self._on_monitor_toggle_done(new_state, error))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_monitor_toggle_done(self, new_state: bool, error: str | None) -> None:
+        self.btn_monitor.configure(state="normal")
+        if error is not None:
+            messagebox.showerror("Monitor mode", f"Nie udało się przełączyć: {error}")
+            # przywróć poprzedni wygląd przycisku
+            current = tls_sniffer.is_monitor_mode()
+            self._update_monitor_button(current)
+            return
+        self._update_monitor_button(new_state)
+
+    def _update_monitor_button(self, monitor: bool) -> None:
+        if monitor:
+            self.btn_monitor.configure(text="Wyłącz monitor mode", fg_color="#c0392b", hover_color="#a02818")
+            self.monitor_status.configure(
+                text="Monitor mode aktywny — Wi-Fi rozłączone, ramki 802.11 surowe",
+                text_color="#e74c3c",
+            )
+        else:
+            self.btn_monitor.configure(text="Włącz monitor mode", fg_color="#1f538d", hover_color="#14375e")
+            self.monitor_status.configure(
+                text="Tryb normalny (widzisz tylko ruch swojego hosta)",
+                text_color="#aaaaaa",
+            )
 
     def save_settings_action(self):
         selected_label = self.iface_switch.get()

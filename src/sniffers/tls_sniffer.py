@@ -3,7 +3,9 @@
 
 import hashlib
 import struct
+import sys
 import threading
+import time
 
 from scapy.layers.inet import IP, TCP
 from scapy.packet import Raw
@@ -11,12 +13,16 @@ from scapy.sendrecv import AsyncSniffer, sniff
 
 from database import TLSEvent, SessionLocal, init_db, utcnow
 
-__all__ = ["start", "start_in_background", "set_iface"]
+__all__ = ["start", "start_in_background", "set_iface", "set_monitor_mode", "is_monitor_mode"]
 
 _BPF = "tcp port 443"
 
+# Stan działającego snifera trzymamy w module, żeby GUI mogło przełączać interfejs
+# i tryb monitor (Wi-Fi) niezależnie, bez utraty drugiego ustawienia.
 _lock = threading.Lock()
 _current: AsyncSniffer | None = None
+_iface: str | None = None
+_monitor: bool = False
 
 # Wartości GREASE (RFC 8701) — Chrome i inne klienty losowo wstrzykują je do listy
 # szyfrów/rozszerzeń/krzywych. JA3 musi je pominąć, inaczej fingerprint zmienia się przy każdym
@@ -124,25 +130,79 @@ def start(iface: str | None = None) -> None:
     sniff(filter=_BPF, prn=_handle, store=False, iface=iface)
 
 
+def _default_monitor_iface() -> str | None:
+    # Monitor mode wymaga jawnego interfejsu Wi-Fi. scapy z iface=None bierze conf.iface,
+    # które na macOS bywa lo0 albo czymś bez Wi-Fi — wtedy otwarcie BPF kończy się błędem.
+    if sys.platform == "darwin":
+        return "en0"
+    if sys.platform.startswith("linux"):
+        return "wlan0"
+    return None
+
+
+def _spawn(iface: str | None, monitor: bool) -> AsyncSniffer:
+    # W trybie monitor (Wi-Fi) ramki to 802.11, więc kernelowy filtr "tcp port 443" nie ma na czym
+    # zadziałać — pomijamy go i polegamy na parserze. W zwykłym trybie filtr odsiewa szum w jądrze.
+    effective = iface if (iface or not monitor) else _default_monitor_iface()
+    sniffer = AsyncSniffer(
+        filter=None if monitor else _BPF,
+        prn=_handle,
+        store=False,
+        iface=effective,
+        monitor=monitor,
+    )
+    sniffer.start()
+    # AsyncSniffer.start() wraca natychmiast — błędy z otwarcia BPF dzieją się w wątku roboczym.
+    # Bez tej kontroli wątek po prostu umiera, a GUI myśli, że wszystko OK.
+    time.sleep(0.2)
+    if not sniffer.running:
+        exc = getattr(sniffer, "exception", None)
+        detail = f": {exc}" if exc else ""
+        raise RuntimeError(
+            f"sniffer nie wystartował na iface={effective!r} monitor={monitor}{detail}. "
+            "Sprawdź, czy iface jest poprawny, masz uprawnienia (sudo) i nie używa go inny proces "
+            "(np. Wireless Diagnostics trzyma en0 w monitor mode na wyłączność)."
+        )
+    return sniffer
+
+
 def start_in_background(iface: str | None = None) -> None:
-    global _current
+    global _current, _iface
     with _lock:
         if _current is not None:
             return
-        _current = AsyncSniffer(filter=_BPF, prn=_handle, store=False, iface=iface)
-        _current.start()
+        _current = _spawn(iface, _monitor)
+        _iface = iface
 
 
 def set_iface(iface: str | None) -> None:
-    global _current
+    global _current, _iface
     with _lock:
         if _current is not None:
             try:
                 _current.stop()
             except Exception:
                 pass
-        _current = AsyncSniffer(filter=_BPF, prn=_handle, store=False, iface=iface)
-        _current.start()
+        _current = _spawn(iface, _monitor)
+        _iface = iface
+
+
+def set_monitor_mode(monitor: bool) -> None:
+    """Zatrzymuje sniffer i startuje go ponownie z innym ustawieniem monitor mode.
+    Zachowuje aktualnie wybrany interfejs."""
+    global _current, _monitor
+    with _lock:
+        if _current is not None:
+            try:
+                _current.stop()
+            except Exception:
+                pass
+        _current = _spawn(_iface, monitor)
+        _monitor = monitor
+
+
+def is_monitor_mode() -> bool:
+    return _monitor
 
 
 if __name__ == "__main__":
