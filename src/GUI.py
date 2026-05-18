@@ -24,7 +24,7 @@ class NetworkScannerGUI(ctk.CTk):
         super().__init__()
 
         self.title("Passive Network Sentinel - PJATK Project")
-        self.geometry("1200x700")  # Poprawiony format geometrii okna
+        self.geometry("1200x700") 
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -38,7 +38,6 @@ class NetworkScannerGUI(ctk.CTk):
             print(f"Błąd logo: {e}")
             self.logo_image = None
 
-        # --- PANEL BOCZNY (SIDEBAR) ---
         self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         
@@ -69,13 +68,11 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.status_label.pack(side="bottom", pady=20)
 
-        # --- RAMKI WIDOKÓW (WIDGETY KONTENERY) ---
         self.dashboard_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.dhcp_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.mdns_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.settings_frame = ctk.CTkFrame(self, fg_color="transparent")
 
-        # Budowanie komponentów wewnątrz ramek
         self.build_dashboard_view()
         self.build_dhcp_view()
         self.build_mdns_view()
@@ -88,7 +85,6 @@ class NetworkScannerGUI(ctk.CTk):
         arp_sniffer.start_in_background()
         self.update_data()
 
-    # --- WIDOK: DASHBOARD ---
     def build_dashboard_view(self):
         self.stats_frame = ctk.CTkFrame(self.dashboard_frame, height=80)
         self.stats_frame.pack(fill="x", pady=(0, 10))
@@ -142,7 +138,6 @@ class NetworkScannerGUI(ctk.CTk):
         )
         self.export_btn.pack(pady=(20, 0))
 
-    # --- WIDOK: DHCP ---
     def build_dhcp_view(self):
         lbl = ctk.CTkLabel(self.dhcp_frame, text="Głęboka Inspekcja DHCP i Rozpoznawanie Systemów (OS Fingerprinting)", font=ctk.CTkFont(size=18, weight="bold"))
         lbl.pack(pady=10, anchor="w", padx=10)
@@ -160,7 +155,6 @@ class NetworkScannerGUI(ctk.CTk):
         self.table_dhcp.column("OS", width=150, stretch=False, anchor="center")
         self.table_dhcp.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # --- WIDOK: mDNS ---
     def build_mdns_view(self):
         lbl = ctk.CTkLabel(self.mdns_frame, text="Wykryte Rekordy mDNS i Rozgłaszane Usługi Sieciowe", font=ctk.CTkFont(size=18, weight="bold"))
         lbl.pack(pady=10, anchor="w", padx=10)
@@ -175,7 +169,6 @@ class NetworkScannerGUI(ctk.CTk):
         self.table_mdns.column("Services", width=400, stretch=True)
         self.table_mdns.pack(fill="both", expand=True, padx=10, pady=10)
 
-    # --- WIDOK: SETTINGS ---
     def build_settings_view(self):
         title = ctk.CTkLabel(self.settings_frame, text="Ustawienia Skanera", font=ctk.CTkFont(size=18, weight="bold"))
         title.pack(pady=10, padx=10, anchor="w")
@@ -213,7 +206,6 @@ class NetworkScannerGUI(ctk.CTk):
         )
         btn_save.pack(pady=30, padx=20, anchor="w")
 
-    # --- LOGIKA NAWIGACJI PANELU BOCZNEGO ---
     def hide_all_frames(self):
         """Pomocnicza metoda ukrywająca wszystkie widoki przed przełączeniem"""
         for frame in [self.dashboard_frame, self.dhcp_frame, self.mdns_frame, self.settings_frame]:
@@ -280,7 +272,6 @@ class NetworkScannerGUI(ctk.CTk):
                     session.query(mDNSEvent).delete()
                     session.commit()
                 
-                # Wyczyszczenie widoków tabelarycznych na ekranie
                 for t in [self.table, self.table_dhcp, self.table_mdns]:
                     for i in t.get_children():
                         t.delete(i)
@@ -307,9 +298,7 @@ class NetworkScannerGUI(ctk.CTk):
         style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat")
         style.map("Treeview", background=[('selected', '#1f538d')])
 
-    # --- SEKCJA AUTOMATYCZNEGO ODŚWIEŻANIA DANYCH Z MODELI ---
     def update_data(self):
-        # 1. Czyszczenie zawartości trzech tabel przed załadowaniem świeżych danych
         for t in [self.table, self.table_dhcp, self.table_mdns]:
             for i in t.get_children():
                 t.delete(i)
@@ -319,7 +308,6 @@ class NetworkScannerGUI(ctk.CTk):
 
         try:
             with SessionLocal() as session:
-                # [TABELA 1] Zasilanie Dashboardu z modelu Device
                 devices = session.query(Device).all()
                 for d in devices:
                     formatted_time = d.last_seen.strftime("%H:%M:%S") if d.last_seen else "Nieznana"
@@ -330,7 +318,6 @@ class NetworkScannerGUI(ctk.CTk):
                     unique_macs.add(d.mac)
                     total_events += 1
 
-                # [TABELA 2] Zasilanie zakładki DHCP z dedykowanego modelu DHCPEvent
                 dhcp_records = session.query(DHCPEvent).all()
                 for dhcp in dhcp_records:
                     t_time = dhcp.timestamp.strftime("%H:%M:%S") if dhcp.timestamp else "Nieznana"
@@ -338,7 +325,6 @@ class NetworkScannerGUI(ctk.CTk):
                     self.table_dhcp.insert("", "end", values=row_dhcp)
                     unique_macs.add(dhcp.mac)
 
-                # [TABELA 3] Zasilanie zakładki mDNS z dedykowanego modelu mDNSEvent
                 mdns_records = session.query(mDNSEvent).all()
                 for mdns in mdns_records:
                     m_time = mdns.timestamp.strftime("%H:%M:%S") if mdns.timestamp else "Nieznana"
@@ -352,7 +338,6 @@ class NetworkScannerGUI(ctk.CTk):
             
         current_unique_count = len(unique_macs)
         
-        # Logika wyskakujących powiadomień systemowych
         if self.last_device_count > 0 and current_unique_count > self.last_device_count:
             if self.switch_notifications.get() == 1:
                 try:
